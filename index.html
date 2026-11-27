@@ -65,6 +65,10 @@ const fmt=v=>String(Math.round(v*1e6)/1e6),today=()=>new Date(Date.now()-TZ*36e5
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const app=initializeApp(FIREBASE_CONFIG);let db;try{db=initializeFirestore(app,{localCache:persistentLocalCache()})}catch(e){db=initializeFirestore(app,{})}
 let role,loc,day,cat,data;
+const CATC={};
+async function getCat(l){if(CATC[l])return CATC[l];const r=doc(db,"locs",l),s=await getDoc(r);let c=null;
+ if(s.exists())c=s.data();else if(SEED[l]){await setDoc(r,SEED[l]);c=SEED[l]}
+ return CATC[l]=c}
 const st=(t,e)=>{$("st").textContent=t;$("st").className=e?"err":""};
 
 const ses=()=>{try{return localStorage.getItem("ipvu")}catch(e){return null}};
@@ -80,9 +84,9 @@ function enter(k){const u=USERS[k];role=u.role;loc=u.loc;$("login").hidden=true;
  else{$("sumv").hidden=true;open(loc,day)}}
 $("tabs").onclick=e=>{const b=e.target.closest("button");if(!b)return;b.dataset.l==="_sum"?showSummary():open(b.dataset.l,day)};
 $("dt").onchange=()=>$("dt").value&&open(loc,$("dt").value);
-$("ref").onclick=()=>{open(loc,day);if(role==="admin")badges()};
-async function badges(){for(const k of Object.keys(LOCS)){try{const s=await getDoc(doc(db,"locs",k,"days",today()));
- $("u_"+k).textContent=s.exists()&&s.data().upd?"act. "+new Date(s.data().upd).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"sin datos hoy"}catch(x){$("u_"+k).textContent="—"}}}
+$("ref").onclick=()=>{delete CATC[loc];open(loc,day);if(role==="admin")badges()};
+async function badges(){await Promise.all(Object.keys(LOCS).map(async k=>{try{const s=await getDoc(doc(db,"locs",k,"days",today()));
+ $("u_"+k).textContent=s.exists()&&s.data().upd?"act. "+new Date(s.data().upd).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):"sin datos hoy"}catch(x){$("u_"+k).textContent="—"}}))}
 
 const fin=id=>{const m=data.mov[id]||{};return n(data.inicio[id])+n(m.e)-n(m.t)-n(m.m)-n(m.s)-n(m.d)};
 function paintRow(tr){const id=tr.dataset.id,f=fin(id),c=tr.querySelector(".fin");c.textContent=fmt(f);c.className="fin"+(f<0?" neg":"");
@@ -92,13 +96,10 @@ const inp=(k,v,ok)=>`<input type="number" step="any" inputmode="decimal" data-k=
 async function open(l,d){
  loc=l;day=d;$("edv").hidden=false;$("sumv").hidden=true;$("dt").value=d;document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.l===l));
  $("tb").innerHTML="";$("msg").innerHTML="";st("Cargando…");
- let cs=await getDoc(doc(db,"locs",l));
- if(!cs.exists()&&SEED[l]){try{await setDoc(doc(db,"locs",l),SEED[l]);cs=await getDoc(doc(db,"locs",l))}catch(x){return st("No se pudo cargar el catálogo: "+(x.code||x),1)}}
- if(!cs.exists()){cat=null;$("save").disabled=true;
-  if(role==="admin"&&SEED[l]){$("msg").innerHTML=`<p>Este local aún no tiene catálogo. <button class="p" id="seed">Cargar catálogo inicial de ${esc(LOCS[l])}</button></p>`;
-   $("seed").onclick=async()=>{await setDoc(doc(db,"locs",l),SEED[l]);open(l,d)}}
-  return st("Local sin configurar.",1)}
- cat=cs.data();$("save").disabled=false;const ref=doc(db,"locs",l,"days",d),s=await getDoc(ref);
+ const ref=doc(db,"locs",l,"days",d);let s;
+ try{let c;[c,s]=await Promise.all([getCat(l),getDoc(ref)]);cat=c?JSON.parse(JSON.stringify(c)):null}catch(x){return st("No se pudo cargar: "+(x.code||x),1)}
+ if(!cat){$("save").disabled=true;return st("Local sin configurar.",1)}
+ $("save").disabled=false;
  if(s.exists())data={inicio:{},mov:{},obs:"",...s.data()};
  else{data={inicio:{},mov:{},obs:""};
   const p=await getDocs(query(collection(db,"locs",l,"days"),where(documentId(),"<",d),orderBy(documentId(),"desc"),limit(1)));
@@ -133,7 +134,7 @@ $("af").onsubmit=e=>{e.preventDefault();const nm=$("an").value.trim().toUpperCas
  $("am").hidden=true;render();st("Producto agregado. Pulsa Guardar para aplicarlo al local.")};
 $("save").onclick=async()=>{if(!cat)return;data.obs=$("obs").value;const ref=doc(db,"locs",loc,"days",day),upd=Date.now();
  st(navigator.onLine?"Guardando…":"Sin conexión: se enviará al reconectar…");
- try{if(role==="admin"){await setDoc(doc(db,"locs",loc),cat);CAT[loc]=cat;await setDoc(ref,{inicio:data.inicio,mov:data.mov,obs:data.obs,upd})}
+ try{if(role==="admin"){await setDoc(doc(db,"locs",loc),cat);CAT[loc]=cat;CATC[loc]=JSON.parse(JSON.stringify(cat));await setDoc(ref,{inicio:data.inicio,mov:data.mov,obs:data.obs,upd})}
   else await updateDoc(ref,{mov:data.mov,obs:data.obs,upd});
   st("Guardado ✓ "+new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));if(role==="admin")badges()}
  catch(x){st("No se pudo guardar: "+(x.code||x),1)}};
@@ -145,11 +146,12 @@ const hasMov=d=>Object.values((d&&d.mov)||{}).some(m=>Object.values(m).some(v=>v
 async function showSummary(){$("edv").hidden=true;$("sumv").hidden=false;
  document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.l==="_sum"));
  if(!cm){const p=day.split("-");cm=[+p[0],+p[1]]}
- st("Resumen de todos los locales");$("dayv").innerHTML="<p>Cargando…</p>";await loadMonth();drawCal();drawDay()}
-async function loadMonth(){const[y,m]=cm,a=`${y}-${pad(m)}-01`,b=`${y}-${pad(m)}-31`;
- for(const k of Object.keys(LOCS)){MON[k]={};
-  try{const s=await getDocs(query(collection(db,"locs",k,"days"),where(documentId(),">=",a),where(documentId(),"<=",b)));s.docs.forEach(d=>MON[k][d.id]=d.data())}catch(x){}
-  try{const c=await getDoc(doc(db,"locs",k));if(c.exists())CAT[k]=c.data();else if(SEED[k]){await setDoc(doc(db,"locs",k),SEED[k]);CAT[k]=SEED[k]}}catch(x){}}}
+ st("Resumen de todos los locales");$("dayv").innerHTML="<p>Cargando…</p>";await loadDay();drawCal();drawDay();monthP=loadMonth().then(drawCal)}
+let monthP=Promise.resolve();
+async function loadDay(){await Promise.all(Object.keys(LOCS).map(async k=>{try{CAT[k]=await getCat(k)}catch(x){}
+ try{const s=await getDoc(doc(db,"locs",k,"days",day));MON[k]=MON[k]||{};if(s.exists())MON[k][day]=s.data();else delete MON[k][day]}catch(x){}}))}
+async function loadMonth(){const[y,m]=cm,a=`${y}-${pad(m)}-01`,b=`${y}-${pad(m)}-31`,R={};
+ await Promise.all(Object.keys(LOCS).map(async k=>{R[k]={};try{const s=await getDocs(query(collection(db,"locs",k,"days"),where(documentId(),">=",a),where(documentId(),"<=",b)));s.docs.forEach(d=>R[k][d.id]=d.data())}catch(x){}}));MON=R}
 async function shiftM(k){let[y,m]=cm;m+=k;if(m<1){m=12;y--}if(m>12){m=1;y++}cm=[y,m];await loadMonth();drawCal()}
 function drawCal(){const[y,m]=cm,first=new Date(Date.UTC(y,m-1,1)),dim=new Date(Date.UTC(y,m,0)).getUTCDate(),off=(first.getUTCDay()+6)%7,t=today(),K=Object.keys(LOCS);
  let h=`<div class="ch"><button data-m="-1">‹</button><b>${first.toLocaleDateString("es",{month:"long",year:"numeric",timeZone:"UTC"})}</b><button data-m="1">›</button></div><div class="cg">`+["L","M","X","J","V","S","D"].map(x=>`<i>${x}</i>`).join("");
@@ -157,9 +159,9 @@ function drawCal(){const[y,m]=cm,first=new Date(Date.UTC(y,m-1,1)),dim=new Date(
  for(let d=1;d<=dim;d++){const id=`${y}-${pad(m)}-${pad(d)}`,c=K.filter(k=>hasMov((MON[k]||{})[id])).length;
   h+=`<button data-d="${id}" class="${id===day?"sel ":""}${id===t?"td ":""}${c?"has":""}" ${id>t?"disabled":""}>${d}<small>${c?c+"/"+K.length:""}</small></button>`}
  $("cal").innerHTML=h+"</div>"}
-$("cal").onclick=e=>{const b=e.target.closest("button");if(!b||b.disabled)return;
- if(b.dataset.m)shiftM(+b.dataset.m);else if(b.dataset.d){day=b.dataset.d;drawCal();drawDay()}};
-$("all").onchange=()=>drawDay();$("rs").onclick=()=>showSummary();
+$("cal").onclick=async e=>{const b=e.target.closest("button");if(!b||b.disabled)return;
+ if(b.dataset.m)shiftM(+b.dataset.m);else if(b.dataset.d){day=b.dataset.d;await monthP;drawCal();drawDay()}};
+$("all").onchange=()=>drawDay();$("rs").onclick=()=>{for(const k in CATC)delete CATC[k];showSummary()};
 $("dayv").onclick=e=>{const b=e.target.closest("[data-ed]");if(b)open(b.dataset.ed,day)};
 function drawDay(){const all=$("all").checked;let h=`<h3>${fd(day)}</h3>`;
  for(const[k,name]of Object.entries(LOCS)){const d=(MON[k]||{})[day],c=CAT[k];

@@ -31,6 +31,7 @@ td.nm,th:first-child{position:sticky;left:0;background:#fff;z-index:1}th:first-c
 .lc table{min-width:520px}.ok{color:#17612b}
 .ov{position:fixed;left:0;right:0;top:0;bottom:0;background:#10272bbb;display:flex;align-items:center;justify-content:center;padding:18px;z-index:5}
 .mod{background:#fff;border-radius:14px;padding:20px;width:min(380px,100%)}.mod input{width:100%;padding:11px;margin:5px 0 10px;border:1px solid #b9cbcd;border-radius:8px}.bt{display:flex;gap:8px}
+.syn .ini,.syn .fin{opacity:.3}
 </style></head><body>
 <form id="login"><h1>IPV Central</h1><p>Escribe tu usuario y tu PIN.</p>
 <label>Usuario</label><input id="em" autocapitalize="none" autocorrect="off" autocomplete="username" required>
@@ -93,21 +94,43 @@ function paintRow(tr){const id=tr.dataset.id,f=fin(id),c=tr.querySelector(".fin"
  const a=tr.querySelector(".al");if(a){const mn=n(cat.items.find(x=>x.id===id).m);a.textContent=f>mn?"POR ENCIMA":f<mn?"POR DEBAJO":"EN EL MÍNIMO";a.className="al "+(f>mn?"hi":f<mn?"lo":"eq")}}
 const inp=(k,v,ok)=>`<input type="number" step="any" inputmode="decimal" data-k="${k}" value="${v??""}" ${ok?"":"readonly"}>`;
 
+let openTok=0,ed={mov:{},i:{},min:{}};
+const lget=k=>{try{return JSON.parse(localStorage.getItem("ipv_"+k))}catch(e){return null}};
+const lset=(k,v)=>{try{localStorage.setItem("ipv_"+k,JSON.stringify(v))}catch(e){}};
+const cl=o=>JSON.parse(JSON.stringify(o));
+const syn=f=>document.querySelector(".tw").classList.toggle("syn",f);
 async function open(l,d){
  loc=l;day=d;$("edv").hidden=false;$("sumv").hidden=true;$("dt").value=d;document.querySelectorAll("#tabs button").forEach(b=>b.classList.toggle("on",b.dataset.l===l));
- $("tb").innerHTML="";$("msg").innerHTML="";st("Cargando…");
- const ref=doc(db,"locs",l,"days",d);let s;
- try{let c;[c,s]=await Promise.all([getCat(l),getDoc(ref)]);cat=c?JSON.parse(JSON.stringify(c)):null}catch(x){return st("No se pudo cargar: "+(x.code||x),1)}
- if(!cat){$("save").disabled=true;return st("Local sin configurar.",1)}
- $("save").disabled=false;
- if(s.exists())data={inicio:{},mov:{},obs:"",...s.data()};
- else{data={inicio:{},mov:{},obs:""};
-  const p=await getDocs(query(collection(db,"locs",l,"days"),where(documentId(),"<",d),orderBy(documentId(),"desc"),limit(1)));
-  if(p.empty)cat.items.forEach(it=>data.inicio[it.id]=n(it.i0));
+ $("msg").innerHTML="";ed={mov:{},i:{},min:{}};const tok=++openTok;
+ /* 1) pintar al instante: catálogo guardado en el teléfono o el incluido en la página */
+ const cc=lget("cat_"+l)||SEED[l],cd=lget("day_"+l+"_"+d);let shown="";
+ if(cc){cat=cl(cc);data=cd?{inicio:{},mov:{},obs:"",...cd}:{inicio:{},mov:{},obs:""};$("obs").value=data.obs||"";render();syn(!cd);$("save").disabled=true;st("Sincronizando…");shown=JSON.stringify([cat,data])}
+ else{$("tb").innerHTML="";st("Cargando…")}
+ /* 2) traer lo más reciente de la nube */
+ const ref=doc(db,"locs",l,"days",d);let s,c;
+ try{[c,s]=await Promise.all([getCat(l),getDoc(ref)])}catch(x){if(tok===openTok){syn(false);st("Sin conexión con el servidor: "+(x.code||x),1)}return}
+ if(tok!==openTok)return;
+ if(!c){syn(false);$("tb").innerHTML="";return st("Local sin configurar.",1)}
+ cat=cl(c);let nd;
+ if(s.exists())nd={inicio:{},mov:{},obs:"",...s.data()};
+ else{nd={inicio:{},mov:{},obs:""};let p;
+  try{p=await getDocs(query(collection(db,"locs",l,"days"),where(documentId(),"<",d),orderBy(documentId(),"desc"),limit(1)))}catch(x){return st("No se pudo cargar: "+(x.code||x),1)}
+  if(tok!==openTok)return;
+  if(p.empty)cat.items.forEach(it=>nd.inicio[it.id]=n(it.i0));
   else{const pd=p.docs[0].data();cat.items.forEach(it=>{const m=(pd.mov||{})[it.id]||{};
-   data.inicio[it.id]=Math.round((n((pd.inicio||{})[it.id])+n(m.e)-n(m.t)-n(m.m)-n(m.s)-n(m.d))*1e6)/1e6})}
-  if(role!=="admin"){try{await setDoc(ref,data)}catch(x){return st("No se pudo abrir el día de hoy: "+(x.code||x),1)}}}
- $("obs").value=data.obs||"";render();st(role==="admin"?"Editando "+LOCS[l]+" · "+d:"Día de hoy: "+d)}
+   nd.inicio[it.id]=Math.round((n((pd.inicio||{})[it.id])+n(m.e)-n(m.t)-n(m.m)-n(m.s)-n(m.d))*1e6)/1e6})}
+  if(role!=="admin"){try{await setDoc(ref,nd)}catch(x){return st("No se pudo abrir el día de hoy: "+(x.code||x),1)}}}
+ if(tok!==openTok)return;
+ /* lo que el usuario ya escribió mientras sincronizaba se conserva */
+ for(const id in ed.mov)nd.mov[id]={...(nd.mov[id]||{}),...ed.mov[id]};
+ for(const id in ed.i)nd.inicio[id]=ed.i[id];
+ for(const id in ed.min){const it=cat.items.find(x=>x.id===id);if(it)it.m=ed.min[id]}
+ if(cc&&$("obs").value!==(data.obs||""))nd.obs=$("obs").value;
+ data=nd;lset("cat_"+l,c);if(d===today())lset("day_"+l+"_"+d,nd);
+ if(JSON.stringify([cat,data])!==shown){const ae=document.activeElement,fi=ae&&$("tb").contains(ae)&&ae.closest("tr[data-id]")?[ae.closest("tr").dataset.id,ae.dataset.k]:null;
+  $("obs").value=data.obs||"";render();
+  if(fi){const e=$("tb").querySelector(`tr[data-id="${fi[0]}"] input[data-k="${fi[1]}"]`);if(e)e.focus()}}
+ syn(false);$("save").disabled=false;st(role==="admin"?"Editando "+LOCS[l]+" · "+d:"Día de hoy: "+d)}
 
 function render(){
  const q=$("q").value.trim().toLowerCase(),adm=role==="admin",F=cat.fields;let g="";
@@ -115,13 +138,13 @@ function render(){
  cat.items.forEach(it=>{if(q&&!it.n.toLowerCase().includes(q))return;
   if(cat.gl&&it.g!==g){g=it.g;h+=`<tr class="band"><td colspan="20">${esc(g)}</td></tr>`}
   const m=data.mov[it.id]||{};
-  h+=`<tr data-id="${it.id}"><td class="nm">${esc(it.n)}</td>`+(cat.gl?"":`<td>${esc(it.g)}</td>`)+`<td>${inp("i",data.inicio[it.id],adm)}</td>`
+  h+=`<tr data-id="${it.id}"><td class="nm">${esc(it.n)}</td>`+(cat.gl?"":`<td>${esc(it.g)}</td>`)+`<td class="ini">${inp("i",data.inicio[it.id],adm)}</td>`
    +F.map(k=>`<td>${inp(k,m[k],true)}</td>`).join("")+`<td class="fin"></td>`
    +(cat.useMin?`<td>${inp("min",it.m,adm)}</td><td><span class="al"></span></td>`:"")+(adm?`<td><button data-del="${it.id}">✕</button></td>`:"")+"</tr>"});
  $("tb").innerHTML=h;$("tb").querySelectorAll("tr[data-id]").forEach(paintRow)}
 $("q").oninput=()=>cat&&render();
 $("tb").addEventListener("input",e=>{const t=e.target,tr=t.closest("tr"),id=tr.dataset.id,k=t.dataset.k,v=t.value===""||isNaN(parseFloat(t.value))?"":parseFloat(t.value);
- if(k==="i")data.inicio[id]=n(v);else if(k==="min")cat.items.find(x=>x.id===id).m=n(v);else(data.mov[id]=data.mov[id]||{})[k]=v;
+ if(k==="i"){data.inicio[id]=n(v);ed.i[id]=n(v)}else if(k==="min"){const x=n(v);cat.items.find(q=>q.id===id).m=x;ed.min[id]=x}else{(data.mov[id]=data.mov[id]||{})[k]=v;(ed.mov[id]=ed.mov[id]||{})[k]=v}
  paintRow(tr);st("Cambios sin guardar…")});
 $("tb").addEventListener("click",e=>{const b=e.target.closest("[data-del]");if(!b||!confirm("¿Eliminar este producto del catálogo?"))return;
  cat.items=cat.items.filter(x=>x.id!==b.dataset.del);render();st("Producto quitado. Pulsa Guardar.")});
@@ -136,7 +159,7 @@ $("save").onclick=async()=>{if(!cat)return;data.obs=$("obs").value;const ref=doc
  st(navigator.onLine?"Guardando…":"Sin conexión: se enviará al reconectar…");
  try{if(role==="admin"){await setDoc(doc(db,"locs",loc),cat);CAT[loc]=cat;CATC[loc]=JSON.parse(JSON.stringify(cat));await setDoc(ref,{inicio:data.inicio,mov:data.mov,obs:data.obs,upd})}
   else await updateDoc(ref,{mov:data.mov,obs:data.obs,upd});
-  st("Guardado ✓ "+new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));if(role==="admin")badges()}
+  lset("cat_"+loc,cat);if(day===today())lset("day_"+loc+"_"+day,data);st("Guardado ✓ "+new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));if(role==="admin")badges()}
  catch(x){st("No se pudo guardar: "+(x.code||x),1)}};
 
 /* ===== Resumen / calendario (admin) ===== */

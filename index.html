@@ -7,7 +7,15 @@
 const CFG={apiKey:"AIzaSyDWyFpx8yHjjAvR_tD-Kgaxz_6nh7C8qt8",projectId:"arrecife-ipv"};
 const U="https://firestore.googleapis.com/v1/projects/"+CFG.projectId+"/databases/(default)/documents/locs/_app?key="+CFG.apiKey;
 const $=id=>document.getElementById(id);
-function run(code,ver){window.__IPV_VER=ver;document.open();document.write(code);document.close()}
+const ready=f=>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",f):f();
+function run(code,ver){window.__IPV_VER=ver;
+ const d=new DOMParser().parseFromString(code,"text/html");
+ document.head.querySelectorAll("style").forEach(x=>x.remove());
+ d.head.querySelectorAll("style,link,meta,title").forEach(x=>{if(x.tagName==="TITLE")document.title=x.textContent;else document.head.appendChild(x.cloneNode(true))});
+ const sc=[...d.querySelectorAll("script")].map(s=>({t:s.type,s:s.getAttribute("src"),c:s.textContent}));
+ d.querySelectorAll("script").forEach(s=>s.remove());
+ document.body.innerHTML=d.body.innerHTML;
+ sc.forEach(o=>{const e=document.createElement("script");if(o.t)e.type=o.t;if(o.s)e.src=o.s;else e.textContent=o.c;document.body.appendChild(e)})}
 async function cloud(){const r=await fetch(U);if(r.status===404)return null;if(!r.ok)throw new Error(r.status);
  const f=(await r.json()).fields||{};return{code:f.code&&f.code.stringValue,ver:Number(f.ver&&f.ver.integerValue||0)}}
 function install(m){document.body.innerHTML='<div class="c"><b>Instalar IPV</b><p>'+(m||"Elige el archivo app.html.")+'</p><input type="file" id="f" accept=".html,text/html"><button id="b">Instalar</button><p id="s"></p></div>';
@@ -20,8 +28,8 @@ function install(m){document.body.innerHTML='<div class="c"><b>Instalar IPV</b><
 (async()=>{
  if(location.hash==="#instalar")return install();
  let c=null;try{c=JSON.parse(localStorage.getItem("ipv_app"))}catch(e){}
- if(c&&c.code)return run(c.code,c.ver);
- try{const x=await cloud();if(x&&x.code){try{localStorage.setItem("ipv_app",JSON.stringify(x))}catch(e){}return run(x.code,x.ver)}install()}
+ if(c&&c.code)return ready(()=>run(c.code,c.ver));
+ try{const x=await cloud();if(x&&x.code){try{localStorage.setItem("ipv_app",JSON.stringify(x))}catch(e){}return ready(()=>run(x.code,x.ver))}install()}
  catch(e){$("m").textContent="No se pudo conectar. Revisa internet y recarga."}
 })();
 </script></body></html>

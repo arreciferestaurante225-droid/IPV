@@ -94,6 +94,8 @@ function paintRow(tr){const id=tr.dataset.id,f=fin(id),c=tr.querySelector(".fin"
  const a=tr.querySelector(".al");if(a){const mn=n(cat.items.find(x=>x.id===id).m);a.textContent=f>mn?"POR ENCIMA":f<mn?"POR DEBAJO":"EN EL MÍNIMO";a.className="al "+(f>mn?"hi":f<mn?"lo":"eq")}}
 const inp=(k,v,ok)=>`<input type="number" step="any" inputmode="decimal" data-k="${k}" value="${v??""}" ${ok?"":"readonly"}>`;
 
+const addD=(d,k)=>{const x=new Date(d+"T00:00:00Z");x.setUTCDate(x.getUTCDate()+k);return x.toISOString().slice(0,10)};
+async function prevDoc(l,d){const r=await Promise.all(Array.from({length:14},(_,i)=>getDoc(doc(db,"locs",l,"days",addD(d,-i-1)))));const f=r.find(x=>x.exists());return{empty:!f,docs:f?[f]:[]}}
 let openTok=0,ed={mov:{},i:{},min:{}};
 const lget=k=>{try{return JSON.parse(localStorage.getItem("ipv_"+k))}catch(e){return null}};
 const lset=(k,v)=>{try{localStorage.setItem("ipv_"+k,JSON.stringify(v))}catch(e){}};
@@ -114,7 +116,7 @@ async function open(l,d){
  cat=cl(c);let nd;
  if(s.exists())nd={inicio:{},mov:{},obs:"",...s.data()};
  else{nd={inicio:{},mov:{},obs:""};let p;
-  try{p=await getDocs(query(collection(db,"locs",l,"days"),where(documentId(),"<",d),orderBy(documentId(),"desc"),limit(1)))}catch(x){return st("No se pudo cargar: "+(x.code||x),1)}
+  try{p=await prevDoc(l,d)}catch(x){return st("No se pudo cargar: "+(x.code||x),1)}
   if(tok!==openTok)return;
   if(p.empty)cat.items.forEach(it=>nd.inicio[it.id]=n(it.i0));
   else{const pd=p.docs[0].data();cat.items.forEach(it=>{const m=(pd.mov||{})[it.id]||{};
